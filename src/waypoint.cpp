@@ -9,6 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <vector>
+#include <cmath>
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -17,9 +18,14 @@ using namespace px4_msgs::msg;
 class OffboardControl : public rclcpp::Node
 {
 public:
+	enum State {
+			IDLE,
+			TAKEOFF,
+			MISSION,
+			LAND
+		};
 	OffboardControl() : Node("offboard_control")
 	{
-
 		offboard_control_mode_publisher_ = this->create_publisher<OffboardControlMode>("/fmu/in/offboard_control_mode", 10);
 		trajectory_setpoint_publisher_ = this->create_publisher<TrajectorySetpoint>("/fmu/in/trajectory_setpoint", 10);
 		vehicle_command_publisher_ = this->create_publisher<VehicleCommand>("/fmu/in/vehicle_command", 10);
@@ -35,39 +41,50 @@ public:
 			current_position_ = {msg->position[0], msg->position[1], msg->position[2]};
 		});
 
-		is_mission_started_ = false;
+		current_state_ = State::IDLE;
 		offboard_setpoint_counter_=0;
+		current_waypoint_index_ = 0;
 
 		auto timer_callback = [this]() -> void {
 					
-			if (offboard_setpoint_counter_ == 10) {
+		switch (current_state_)
+		{
+		case State::IDLE:
+			if (offboard_setpoint_counter_ >= 10) {
 				// Change to Offboard mode after 10 setpoints
 				this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
 
 				// Arm the vehicle
 				this->arm();
-
+				current_state_ = State::TAKEOFF;
 				
 				RCLCPP_INFO(this->get_logger(), "Switched to Offboard mode and armed the vehicle");
-
 			}
-
-			else if (offboard_setpoint_counter_ == 50) {
+			break;
+		case State::TAKEOFF:
+			if (Takeoff_Success()) {
                 // After takeoff and some time, command to go to a position
+				RCLCPP_WARN(this->get_logger(), "MISSION has started");
                 this->goto_position(waypoints_[0][0], waypoints_[0][1], waypoints_[0][2], NAN); // x=10m, y=0m, z=5m, yaw=90 degrees
 				RCLCPP_INFO(this->get_logger(), "Going to position (%.2f, %.2f, %.2f)", waypoints_[0][0], waypoints_[0][1], waypoints_[0][2]);
-				is_mission_started_ = true;
+				current_state_ = State::MISSION;
+				
             }
-
-			if (is_mission_started_) {
-				WaypointHandler();
-			}
-			
+			break;
+		case State::MISSION:
+			WaypointHandler();
+			break;
+		case State::LAND:
+			land();
+			break;
+		default:
+			break;
+		}	
 			publish_offboard_control_mode();
 			publish_trajectory_setpoint();
 
-			// stop the counter after reaching 11
-			if (offboard_setpoint_counter_ < 1000) {
+			// stop the counter after reaching 100
+			if (offboard_setpoint_counter_ < 100) {
 				offboard_setpoint_counter_++;
 			}
 			
@@ -82,6 +99,7 @@ public:
 	bool OdometryReceived();
 	bool WaypointReached(const std::array<float, 3>& current, const std::array<float, 3>& target, float threshold);
 	void WaypointHandler();
+	bool Takeoff_Success();
 
 private:
 	rclcpp::TimerBase::SharedPtr timer_;
@@ -103,6 +121,7 @@ private:
 		{0.0, 10.0, -5.0},
 		{0.0, 0.0, -5.0}
 	};
+	State current_state_;
 
 	uint64_t offboard_setpoint_counter_;   //!< counter for the number of setpoints sent
 
@@ -172,25 +191,34 @@ void OffboardControl::goto_position(float x, float y, float z, float yaw_deg)
 
 void OffboardControl::WaypointHandler()
 {
-	if (!is_mission_started_ || !OdometryReceived()) {
+	if (current_state_ != State::MISSION || !OdometryReceived()) {
 		return;
 	}
 
-	if (WaypointReached(current_position_, waypoints_[current_waypoint_index_], 3.0)) {
+	if (WaypointReached(current_position_, waypoints_[current_waypoint_index_], 0.5)) {
 		RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu", current_waypoint_index_ + 1);
 		current_waypoint_index_++;
 		if (current_waypoint_index_ < waypoints_.size()) {
 			goto_position(waypoints_[current_waypoint_index_][0], waypoints_[current_waypoint_index_][1], waypoints_[current_waypoint_index_][2], NAN);
 			RCLCPP_INFO(this->get_logger(), "Going to position (%.2f, %.2f, %.2f)", waypoints_[current_waypoint_index_][0], waypoints_[current_waypoint_index_][1], waypoints_[current_waypoint_index_][2]);
 		} else {
-			RCLCPP_INFO(this->get_logger(), "Mission completed. Landing...");
+			RCLCPP_WARN(this->get_logger(), "Mission completed. Landing...");
+			current_state_ = State::LAND;
 			land();
-			disarm();
-			is_mission_started_ = false;
 		}
 	}
 }
 
+bool OffboardControl::Takeoff_Success()
+{
+	if (!WaypointReached(current_position_, {0.0, 0.0, -5.0}, 0.5)) {
+		return false;
+	}
+	else
+	{
+		return true;
+	}
+}
 /**
  * @brief Publish a trajectory setpoint
  *        For this example, it sends a trajectory setpoint to make the
@@ -249,8 +277,6 @@ void OffboardControl::publish_vehicle_command(uint16_t command, float param1, fl
 	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
 	vehicle_command_publisher_->publish(msg);
 }
-
-
 
 int main(int argc, char *argv[])
 {
