@@ -29,6 +29,12 @@ public:
         this->declare_parameter<int>("drone_id", 1);
         int drone_id = this->get_parameter("drone_id").as_int();
         drone_id_ = drone_id;
+		float y_offset = (drone_id - 1) * 5.0; // 5 meters offset per drone
+		target_position_[1] += y_offset; 
+		// Adjust waypoints based on drone ID
+		for (auto& waypoint : waypoints_) {
+			waypoint[1] += y_offset; // Offset in Y direction
+		}
         std::string node_name = "offboard_control_" + std::to_string(drone_id);
         RCLCPP_INFO(this->get_logger(), "Initializing %s with drone_id: %d", node_name.c_str(), drone_id);
 		std::string prefix = "/px4_" + std::to_string(drone_id);
@@ -81,7 +87,7 @@ public:
 			WaypointHandler();
 			break;
 		case State::LAND:
-			this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 2, 6);
+			this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 4, 6);
 			break;
 		default:
 			break;
@@ -211,7 +217,7 @@ void OffboardControl::WaypointHandler()
 
 bool OffboardControl::Takeoff_Success()
 {
-	if (!WaypointReached(current_position_, {0.0, 0.0, -5.0}, 0.5)) {
+	if (!WaypointReached(current_position_, target_position_, 0.5)) {
 		return false;
 	}
 	else
