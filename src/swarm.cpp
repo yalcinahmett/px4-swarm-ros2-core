@@ -81,10 +81,7 @@ public:
 			WaypointHandler();
 			break;
 		case State::LAND:
-			land();
-            if (WaypointReached(current_position_, waypoints_.back(), 0.5)) {
-                current_state_ = State::IDLE;
-            }
+			this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 2, 6);
 			break;
 		default:
 			break;
@@ -185,12 +182,6 @@ void OffboardControl::publish_offboard_control_mode()
  * @brief Send a command to takeoff to a specified altitude
  * @param altitude  Target altitude in meters
  */
-void OffboardControl::land()
-{
-	publish_vehicle_command(VehicleCommand::VEHICLE_CMD_NAV_LAND, NAN,NAN,NAN,NAN,NAN,NAN,NAN);
-
-	RCLCPP_INFO(this->get_logger(), "Land command send");
-}
 
 void OffboardControl::goto_position(float x, float y, float z, float yaw_deg)
 {
@@ -214,7 +205,6 @@ void OffboardControl::WaypointHandler()
 		} else {
 			RCLCPP_WARN(this->get_logger(), "Mission completed. Landing...");
 			current_state_ = State::LAND;
-			land();
 		}
 	}
 }

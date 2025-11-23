@@ -34,6 +34,9 @@ target_compile_features(listener_node PUBLIC c_std_99 cxx_std_17)  # Require C99
 install(TARGETS listener_node
   DESTINATION lib/${PROJECT_NAME})
 
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
 # Offboard Control
 add_executable(offboard_control src/offboard_control.cpp)
 ament_target_dependencies(offboard_control
