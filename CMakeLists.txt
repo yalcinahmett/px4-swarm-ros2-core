@@ -70,7 +70,7 @@ target_compile_features(basic_offboard_control PUBLIC c_std_99 cxx_std_17)  # Re
 install(TARGETS basic_offboard_control
   DESTINATION lib/${PROJECT_NAME})
 
-# Odometry Listener
+# Waypoint
 add_executable(waypoint src/waypoint.cpp)
 ament_target_dependencies(waypoint
   "rclcpp"
@@ -85,7 +85,22 @@ target_include_directories(waypoint PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_compile_features(waypoint PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
 
-install(TARGETS waypoint
+# Swarm Formation
+add_executable(swarm src/swarm.cpp)
+ament_target_dependencies(swarm
+  "rclcpp"
+  "px4_msgs"
+  "sensor_msgs"
+  "geometry_msgs"
+  "builtin_interfaces"
+)
+
+target_include_directories(swarm PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(swarm PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
+
+install(TARGETS swarm
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
