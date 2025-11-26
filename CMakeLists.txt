@@ -89,9 +89,9 @@ target_include_directories(waypoint PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_compile_features(waypoint PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
 
-# Swarm Formation
-add_executable(swarm src/swarm.cpp)
-ament_target_dependencies(swarm
+# Basic Swarm 
+add_executable(basic_swarm src/basic_swarm.cpp)
+ament_target_dependencies(basic_swarm
   "rclcpp"
   "px4_msgs"
   "sensor_msgs"
@@ -99,13 +99,34 @@ ament_target_dependencies(swarm
   "builtin_interfaces"
 )
 
-target_include_directories(swarm PUBLIC
+target_include_directories(basic_swarm PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_compile_features(swarm PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
+target_compile_features(basic_swarm PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
 
-install(TARGETS swarm
+install(TARGETS basic_swarm
   DESTINATION lib/${PROJECT_NAME})
+
+# Advanced Swarm Graph Formation
+add_executable(advanced_swarm src/advanced_swarm.cpp
+src/utils/graph_math.cpp)
+ament_target_dependencies(advanced_swarm
+  "rclcpp"
+  "px4_msgs"
+  "sensor_msgs"
+  "geometry_msgs"
+  "builtin_interfaces"
+  "Eigen3"
+)
+target_link_libraries(advanced_swarm Eigen3::Eigen)
+target_include_directories(advanced_swarm PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(advanced_swarm PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
+
+install(TARGETS advanced_swarm
+  DESTINATION lib/${PROJECT_NAME})  
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

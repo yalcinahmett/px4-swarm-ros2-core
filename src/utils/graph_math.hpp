@@ -14,8 +14,10 @@ private:
     std::vector<Eigen::Vector3d> nodes_des_init; //Initial desired graph (never change once set)
 
     std::vector<Eigen::Vector3d> agent_grad; //Contains the gradp of the swarm_graph
-
     bool have_desired;
+    
+    // Damping için önceki hız değeri
+    Eigen::Vector3d previous_velocity_ = Eigen::Vector3d::Zero();
 
     Eigen::MatrixXd A;   //Adjacency matrix
     Eigen::VectorXd D;   //Degree matrix
@@ -34,6 +36,8 @@ public:
 
     //Update the nodes, feature matrices & desired matrices
     bool updateGraph( const std::vector<Eigen::Vector3d> &swarm); 
+
+    Eigen::Vector3d computeVelocity(int agent_id, const std::vector<Eigen::Vector3d> &swarm_positions);
 
     //Set desired swarm nodes
     bool setDesiredForm( const std::vector<Eigen::Vector3d> &swarm_des );
@@ -62,7 +66,7 @@ public:
 
     typedef std::unique_ptr<SwarmGraph> Ptr;
 
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
 };
 

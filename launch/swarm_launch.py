@@ -11,7 +11,7 @@ def generate_launch_description():
         
         node = Node(
             package='px4-swarm-ros2-core', 
-            executable='swarm',
+            executable='advanced_swarm',
             name=f'swarm_{drone_id}',
             namespace=f'px4_{drone_id}' if drone_id > 0 else '',  # No namespace for drone 0
             output='screen',

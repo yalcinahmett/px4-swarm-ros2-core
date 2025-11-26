@@ -11,7 +11,7 @@ bool SwarmGraph::updateGraph( const std::vector<Eigen::Vector3d> &swarm){
     
     if(nodes.size() != nodes_des.size()){
         std::cout <<"swarm size : " << nodes.size() << std::endl;
-        ROS_WARN("Size of swarm formation vector is incorrect. ");
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Size of swarm formation vector is incorrect. ");
         return false;
     }
 
@@ -30,7 +30,7 @@ bool SwarmGraph::updateGraph( const std::vector<Eigen::Vector3d> &swarm){
             agent_grad.push_back(gradp);
         }
     }else{
-        ROS_WARN( "Please enter the desired formation!!" );
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Please enter the desired formation!!");
     }
     
     return true;
@@ -145,7 +145,7 @@ bool SwarmGraph::calcFGrad( Eigen::Vector3d &gradp, int idx ){
         }
         return true;
     }else{
-        ROS_WARN( "Invalid desired formation." );
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Invalid desired formation.");
         return false;
     }
 }
@@ -155,7 +155,7 @@ Eigen::Vector3d SwarmGraph::getGrad(int id){
         return agent_grad[id];
     } else {
         Eigen::Vector3d grad = Eigen::Vector3d::Zero();
-        ROS_WARN("id is error !!! or desired graph has not been setup !!!");
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "id is error !!! or desired graph has not been setup !!!");
         return grad;
     }
     
@@ -167,7 +167,59 @@ bool SwarmGraph::getGrad(std::vector<Eigen::Vector3d> &swarm_grad){
         return true;
     }
     else{
-        ROS_WARN("desired graph has not been setup !!!");
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "desired graph has not been setup !!!");
         return false;
     }
 }
+
+Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eigen::Vector3d> &swarm_positions) {
+
+    // agent_id artık direkt 0, 1, 2 olarak geliyor
+    if (agent_id < 0 || agent_id >= static_cast<int>(swarm_positions.size())) {
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Invalid agent_id: %d (swarm_size: %zu)", agent_id, swarm_positions.size());
+        return Eigen::Vector3d::Zero();
+    }
+
+    this->updateGraph(swarm_positions);
+    
+    Eigen::Vector3d gradient = this->getGrad(agent_id); 
+    
+    // ===== TUNING PARAMETRELERİ =====
+    double k_gain = 1.0;       // Temel kazanç
+    double max_vel = 2.0;      // Maksimum hız (m/s)
+    double damping = 0.85;     // Damping faktörü - salınımı önler (artırıldı)
+    double min_distance = 0.5; // Bu mesafenin altında dur (artırıldı)
+    // ================================
+    
+    // Z eksenini sıfırla - sadece X ve Y'de hareket
+    gradient.z() = 0.0;
+
+    double distance_to_target = gradient.norm();
+    
+    // Hedefe çok yakınsa dur (jitter önleme)
+    if (distance_to_target < min_distance) {
+        previous_velocity_ = Eigen::Vector3d::Zero();
+        return Eigen::Vector3d::Zero();
+    }
+    
+    // Adaptif kazanç: mesafe arttıkça kazanç artar
+    double adaptive_gain = k_gain * std::min(distance_to_target / 2.0, 1.0);
+    
+    Eigen::Vector3d velocity = -adaptive_gain * gradient;
+
+    // Maksimum hız sınırı
+    if (velocity.norm() > max_vel) {
+        velocity = velocity.normalized() * max_vel;
+    }
+    
+    // Damping - önceki hız ile smooth geçiş (salınımı önler)
+    velocity = (1.0 - damping) * velocity + damping * previous_velocity_;
+    
+    // Z hızını kesinlikle sıfırla
+    velocity.z() = 0.0;
+    
+    previous_velocity_ = velocity;
+    
+    return velocity;
+}
+
