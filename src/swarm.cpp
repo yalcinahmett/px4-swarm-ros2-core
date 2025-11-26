@@ -26,7 +26,7 @@ public:
 		};
 	OffboardControl() : Node("offboard_control")
 	{
-        this->declare_parameter<int>("drone_id", 1);
+        this->declare_parameter<int>("drone_id", 0);
         int drone_id = this->get_parameter("drone_id").as_int();
         drone_id_ = drone_id;
 		float y_offset = (drone_id - 1) * 5.0; // 5 meters offset per drone
@@ -37,7 +37,13 @@ public:
 		}
         std::string node_name = "offboard_control_" + std::to_string(drone_id);
         RCLCPP_INFO(this->get_logger(), "Initializing %s with drone_id: %d", node_name.c_str(), drone_id);
-		std::string prefix = "/px4_" + std::to_string(drone_id);
+		std::string prefix; // Define outside if-else
+		if (drone_id == 0) {
+			prefix = "";
+		}
+		else {
+			prefix = "/px4_" + std::to_string(drone_id);
+		}	
 		offboard_control_mode_publisher_ = this->create_publisher<OffboardControlMode>(prefix + "/fmu/in/offboard_control_mode", 10);
 		trajectory_setpoint_publisher_ = this->create_publisher<TrajectorySetpoint>(prefix + "/fmu/in/trajectory_setpoint", 10);
 		vehicle_command_publisher_ = this->create_publisher<VehicleCommand>(prefix + "/fmu/in/vehicle_command", 10);
@@ -275,7 +281,7 @@ void OffboardControl::publish_vehicle_command(uint16_t command, float param1, fl
 	msg.param6 = param6;
 	msg.param7 = param7;
 	msg.command = command;
-    msg.target_system = drone_id_ + 1;
+    msg.target_system = drone_id_ + 1; // Assuming drone IDs start from 1 in PX4
     msg.target_component = 1;
     msg.source_system = 1;
     msg.source_component = 1;
