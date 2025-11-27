@@ -114,7 +114,7 @@ public:
 				break;
 		case State::TAKEOFF:
             // After takeoff and some time, command to go to a position
-            if (current_position_[2] <= -4.5){
+            if (current_position_[2] <= -4.9){
 				RCLCPP_INFO(this->get_logger(), "Takeoff successful, current altitude: %f", current_position_[2]);
 				
 				std::vector<Eigen::Vector3d> desired_formation;

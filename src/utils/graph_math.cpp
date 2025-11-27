@@ -25,7 +25,7 @@ bool SwarmGraph::updateGraph( const std::vector<Eigen::Vector3d> &swarm){
         //Update the gradient vector
         Eigen::Vector3d gradp;
         agent_grad.clear();
-        for( int idx = 0; idx < nodes.size(); idx++ ){
+        for( size_t idx = 0; idx < nodes.size(); idx++ ){
             calcFGrad(gradp, idx);
             agent_grad.push_back(gradp);
         }
@@ -60,16 +60,16 @@ bool SwarmGraph::calcMatrices( const std::vector<Eigen::Vector3d> &swarm,
     SNL = Eigen::MatrixXd::Zero( swarm.size(), swarm.size() );
 
     //Adjacency and Degree
-    for( int i = 0; i < swarm.size(); i++ ){
-        for( int j = 0; j < swarm.size(); j++ ){
+    for( size_t i = 0; i < swarm.size(); i++ ){
+        for( size_t j = 0; j < swarm.size(); j++ ){
             Adj(i,j) = calcDist2( swarm[i], swarm[j] );
             Deg(i) += Adj(i,j);
         }
     }
 
     //Symmetric Normalized Laplacian
-    for( int i = 0; i < swarm.size(); i++ ){
-        for( int j = 0; j < swarm.size(); j++ ){
+    for( size_t i = 0; i < swarm.size(); i++ ){
+        for( size_t j = 0; j < swarm.size(); j++ ){
             if( i == j){
                 SNL(i,j) = 1;
             }else{
@@ -137,11 +137,15 @@ bool SwarmGraph::calcFGrad( Eigen::Vector3d &gradp, int idx ){
             }
         }
 
-        //Ignore the machine epsilon
-        if((dfde.transpose() * dedp).norm() > 1e-7){
-            gradp = (dfde.transpose() * dedp).normalized();
-        }else{
-            gradp = Eigen::VectorXd::Zero(3);
+        // Gerçek gradient - normalize ETMİYORUZ!
+        // Böylece uzaktayken büyük, yakındayken küçük gradient elde ediyoruz
+        Eigen::Vector3d raw_grad = dfde.transpose() * dedp;
+        
+        // Çok küçük değerleri sıfırla (sayısal kararlılık için)
+        if(raw_grad.norm() < 1e-7){
+            gradp = Eigen::Vector3d::Zero();
+        } else {
+            gradp = raw_grad;
         }
         return true;
     }else{
@@ -151,7 +155,7 @@ bool SwarmGraph::calcFGrad( Eigen::Vector3d &gradp, int idx ){
 }
 
 Eigen::Vector3d SwarmGraph::getGrad(int id){
-    if (have_desired && id<nodes_des.size()){
+    if (have_desired && id >= 0 && static_cast<size_t>(id) < nodes_des.size()){
         return agent_grad[id];
     } else {
         Eigen::Vector3d grad = Eigen::Vector3d::Zero();
@@ -174,49 +178,58 @@ bool SwarmGraph::getGrad(std::vector<Eigen::Vector3d> &swarm_grad){
 
 Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eigen::Vector3d> &swarm_positions) {
 
-    // agent_id artık direkt 0, 1, 2 olarak geliyor
+    // Güvenlik kontrolleri
     if (agent_id < 0 || agent_id >= static_cast<int>(swarm_positions.size())) {
-        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Invalid agent_id: %d (swarm_size: %zu)", agent_id, swarm_positions.size());
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Invalid agent_id: %d", agent_id);
+        return Eigen::Vector3d::Zero();
+    }
+    
+    if (!have_desired || agent_id >= static_cast<int>(nodes_des.size())) {
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Desired formation not set");
         return Eigen::Vector3d::Zero();
     }
 
+    double k_gain = 100.0;          
+    double max_vel = 3.0;         
+    double damping = 0.4;         
+    double min_gradient = 0.001; 
+    
     this->updateGraph(swarm_positions);
     
-    Eigen::Vector3d gradient = this->getGrad(agent_id); 
+    Eigen::Vector3d gradient = this->getGrad(agent_id);
     
-    // ===== TUNING PARAMETRELERİ =====
-    double k_gain = 1.0;       // Temel kazanç
-    double max_vel = 2.0;      // Maksimum hız (m/s)
-    double damping = 0.85;     // Damping faktörü - salınımı önler (artırıldı)
-    double min_distance = 0.5; // Bu mesafenin altında dur (artırıldı)
-    // ================================
+    // DEBUG LOG
+    RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
+        "Agent %d | Gradient: [%.4f, %.4f, %.4f] Norm: %.4f", 
+        agent_id, gradient.x(), gradient.y(), gradient.z(), gradient.norm());
     
-    // Z eksenini sıfırla - sadece X ve Y'de hareket
     gradient.z() = 0.0;
-
-    double distance_to_target = gradient.norm();
     
-    // Hedefe çok yakınsa dur (jitter önleme)
-    if (distance_to_target < min_distance) {
-        previous_velocity_ = Eigen::Vector3d::Zero();
-        return Eigen::Vector3d::Zero();
+    if (gradient.norm() < min_gradient) {
+        RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
+            "Agent %d STOPPING - gradient %.4f < min %.2f", 
+            agent_id, gradient.norm(), min_gradient);
+        
+        previous_velocity_ = previous_velocity_ * 0.5;
+        if (previous_velocity_.norm() < 0.05) {
+            previous_velocity_ = Eigen::Vector3d::Zero();
+        }
+        return previous_velocity_;
     }
     
-    // Adaptif kazanç: mesafe arttıkça kazanç artar
-    double adaptive_gain = k_gain * std::min(distance_to_target / 2.0, 1.0);
+    Eigen::Vector3d velocity = -k_gain * gradient;
     
-    Eigen::Vector3d velocity = -adaptive_gain * gradient;
-
-    // Maksimum hız sınırı
+    velocity.z() = 0.0;
+    
     if (velocity.norm() > max_vel) {
         velocity = velocity.normalized() * max_vel;
     }
-    
-    // Damping - önceki hız ile smooth geçiş (salınımı önler)
     velocity = (1.0 - damping) * velocity + damping * previous_velocity_;
     
-    // Z hızını kesinlikle sıfırla
-    velocity.z() = 0.0;
+    // DEBUG LOG
+    RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
+        "Agent %d | Velocity: [%.2f, %.2f, %.2f]", 
+        agent_id, velocity.x(), velocity.y(), velocity.z());
     
     previous_velocity_ = velocity;
     
