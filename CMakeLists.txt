@@ -17,96 +17,6 @@ find_package(Eigen3 REQUIRED)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
-# Listeners
-add_executable(listener_node src/listener_node.cpp)
-ament_target_dependencies(listener_node
-  "rclcpp"
-  "px4_msgs"
-  "sensor_msgs"
-  "geometry_msgs"
-  "builtin_interfaces"
-)
-
-target_include_directories(listener_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(listener_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-
-install(TARGETS listener_node
-  DESTINATION lib/${PROJECT_NAME})
-
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}
-)
-# Offboard Control
-add_executable(offboard_control src/offboard_control.cpp)
-ament_target_dependencies(offboard_control
-  "rclcpp"
-  "px4_msgs"
-  "sensor_msgs"
-  "geometry_msgs"
-  "builtin_interfaces"
-)
-
-target_include_directories(offboard_control PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(offboard_control PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-
-install(TARGETS offboard_control
-  DESTINATION lib/${PROJECT_NAME})
-
-# Basic Offboard Control
-add_executable(basic_offboard_control src/basic_control.cpp)
-ament_target_dependencies(basic_offboard_control
-  "rclcpp"
-  "px4_msgs"
-  "sensor_msgs"
-  "geometry_msgs"
-  "builtin_interfaces"
-)
-
-target_include_directories(basic_offboard_control PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(basic_offboard_control PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-
-install(TARGETS basic_offboard_control
-  DESTINATION lib/${PROJECT_NAME})
-
-# Waypoint
-add_executable(waypoint src/waypoint.cpp)
-ament_target_dependencies(waypoint
-  "rclcpp"
-  "px4_msgs"
-  "sensor_msgs"
-  "geometry_msgs"
-  "builtin_interfaces"
-)
-
-target_include_directories(waypoint PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(waypoint PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
-
-# Basic Swarm 
-add_executable(basic_swarm src/basic_swarm.cpp)
-ament_target_dependencies(basic_swarm
-  "rclcpp"
-  "px4_msgs"
-  "sensor_msgs"
-  "geometry_msgs"
-  "builtin_interfaces"
-)
-
-target_include_directories(basic_swarm PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(basic_swarm PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17 
-
-install(TARGETS basic_swarm
-  DESTINATION lib/${PROJECT_NAME})
-
 # Advanced Swarm Graph Formation
 add_executable(advanced_swarm src/advanced_swarm.cpp
 src/utils/graph_math.cpp)
@@ -126,7 +36,6 @@ target_compile_features(advanced_swarm PUBLIC c_std_99 cxx_std_17)  # Require C9
 
 install(TARGETS advanced_swarm
   DESTINATION lib/${PROJECT_NAME})  
-
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

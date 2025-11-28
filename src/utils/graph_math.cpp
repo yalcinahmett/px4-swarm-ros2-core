@@ -137,11 +137,11 @@ bool SwarmGraph::calcFGrad( Eigen::Vector3d &gradp, int idx ){
             }
         }
 
-        // Gerçek gradient - normalize ETMİYORUZ!
-        // Böylece uzaktayken büyük, yakındayken küçük gradient elde ediyoruz
+        // Raw gradient - we do NOT normalize!
+        // This way we get large gradient when far, small when close
         Eigen::Vector3d raw_grad = dfde.transpose() * dedp;
         
-        // Çok küçük değerleri sıfırla (sayısal kararlılık için)
+        // Zero out very small values (for numerical stability)
         if(raw_grad.norm() < 1e-7){
             gradp = Eigen::Vector3d::Zero();
         } else {
@@ -178,7 +178,7 @@ bool SwarmGraph::getGrad(std::vector<Eigen::Vector3d> &swarm_grad){
 
 Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eigen::Vector3d> &swarm_positions) {
 
-    // Güvenlik kontrolleri
+    // Safety checks
     if (agent_id < 0 || agent_id >= static_cast<int>(swarm_positions.size())) {
         RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Invalid agent_id: %d", agent_id);
         return Eigen::Vector3d::Zero();
@@ -189,12 +189,12 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
         return Eigen::Vector3d::Zero();
     }
 
-    // ===== PARAMETRELER =====
-    double k_formation = 0.5;       // Formation gradient kazancı
-    double k_position = 0.8;        // Pozisyon hatası kazancı
+    // ===== PARAMETERS =====
+    double k_formation = 0.5;       // Formation gradient gain
+    double k_position = 0.8;        // Position error gain
     double max_vel = 2.0;
     double damping = 0.3;
-    double min_error = 0.3;         // Bu mesafenin altında "ulaştı" say (m)
+    double min_error = 0.3;         // Consider "converged" below this distance (m)
     double collision_radius = 1.5;
     double collision_gain = 2.0;
     
@@ -207,7 +207,7 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
     double formation_cost = 0.0;
     this->calcFNorm2(formation_cost);
     
-    // ===== CENTROID HESAPLA =====
+    // ===== COMPUTE CENTROID =====
     Eigen::Vector3d current_centroid = Eigen::Vector3d::Zero();
     Eigen::Vector3d desired_centroid = Eigen::Vector3d::Zero();
     
@@ -218,13 +218,13 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
     current_centroid /= static_cast<double>(swarm_positions.size());
     desired_centroid /= static_cast<double>(nodes_des.size());
     
-    // ===== POZİSYON HATASI HESAPLA =====
-    // Her drone'un hedefine olan pozisyon hatası
-    // (desired formation'ı current centroid'e translate et)
+    // ===== COMPUTE POSITION ERROR =====
+    // Position error of each drone to its target
+    // (translate desired formation to current centroid)
     Eigen::Vector3d centroid_offset = current_centroid - desired_centroid;
     Eigen::Vector3d adjusted_desired = nodes_des[agent_id] + centroid_offset;
     Eigen::Vector3d position_error = adjusted_desired - swarm_positions[agent_id];
-    position_error.z() = 0.0;  // Z kilitle
+    position_error.z() = 0.0;  // Lock Z axis
     
     double pos_error_norm = position_error.norm();
     
@@ -240,7 +240,7 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
     
     gradient.z() = 0.0;
     
-    // ===== ÇARPIŞMA ÖNLEME =====
+    // ===== COLLISION AVOIDANCE =====
     Eigen::Vector3d collision_gradient = Eigen::Vector3d::Zero();
     for (size_t i = 0; i < swarm_positions.size(); i++) {
         if (static_cast<int>(i) == agent_id) continue;
@@ -258,7 +258,7 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
         }
     }
     
-    // ===== DURMA KONTROLÜ =====
+    // ===== STOPPING CONTROL =====
     if (pos_error_norm < min_error && collision_gradient.norm() < 0.01) {
         RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
             "[Agent %d] CONVERGED - pos_error=%.3f < min=%.2f", 
@@ -272,17 +272,17 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
         return decaying_vel;
     }
     
-    // ===== HIZ HESAPLA =====
-    // 1. Formation gradient: Şekli düzelt (graph-based)
-    // 2. Position error: Hedefe doğru çek (centroid-aligned)
-    // 3. Collision: Çarpışmadan kaçın
+    // ===== COMPUTE VELOCITY =====
+    // 1. Formation gradient: Fix the shape (graph-based)
+    // 2. Position error: Pull towards target (centroid-aligned)
+    // 3. Collision: Avoid collisions
     
     Eigen::Vector3d vel_formation = -k_formation * gradient;
     Eigen::Vector3d vel_position = k_position * position_error.normalized() * std::min(pos_error_norm, max_vel);
     
-    // Ağırlıklı toplam:
-    // - Formation cost yüksekse: formation ağırlığı artar
-    // - Position error yüksekse: position ağırlığı artar
+    // Weighted sum:
+    // - If formation cost is high: formation weight increases
+    // - If position error is high: position weight increases
     double formation_weight = std::min(1.0, formation_cost * 10.0);  // 0.1 cost → 1.0 weight
     double position_weight = 1.0;
     
@@ -291,7 +291,7 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
                               + collision_gradient;
     velocity.z() = 0.0;
     
-    // ===== HIZ SINIRLA =====
+    // ===== LIMIT VELOCITY =====
     if (velocity.norm() > max_vel) {
         velocity = velocity.normalized() * max_vel;
     }
