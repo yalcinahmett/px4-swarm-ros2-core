@@ -57,3 +57,14 @@ git clone https://github.com/yalcinahmett/px4-swarm-ros2-core.git
 cd ~/ros2_ws
 colcon build 
 source install/setup.bash
+
+### Start Simulation
+Run the headless simulation script to start Gazebo, Micro-XRCE-DDS, and PX4 instances:
+```bash
+cd src/px4-swarm-ros2-core/scripts
+./start_headless_swarm.sh
+
+### Start Swarm Control
+Launch the ROS 2 nodes for the swarm agents:
+```bash
+ros2 launch px4-swarm-ros2-core swarm.launch.py
