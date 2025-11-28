@@ -4,6 +4,7 @@
 #include <memory>
 #include <Eigen/Eigen>
 #include <rclcpp/rclcpp.hpp>
+#include <unordered_map>
 
 
 class SwarmGraph{
@@ -16,8 +17,8 @@ private:
     std::vector<Eigen::Vector3d> agent_grad; //Contains the gradp of the swarm_graph
     bool have_desired;
     
-    // Damping için önceki hız değeri
-    Eigen::Vector3d previous_velocity_ = Eigen::Vector3d::Zero();
+    // Her agent için ayrı previous velocity (map ile)
+    std::unordered_map<int, Eigen::Vector3d> previous_velocities_;
 
     Eigen::MatrixXd A;   //Adjacency matrix
     Eigen::VectorXd D;   //Degree matrix
@@ -59,6 +60,18 @@ public:
     //Get the id_th gradient over position
     Eigen::Vector3d getGrad(int id);
     bool getGrad(std::vector<Eigen::Vector3d> &swarm_grad);
+
+    // Agent bazlı previous velocity yönetimi
+    Eigen::Vector3d getPreviousVelocity(int agent_id) {
+        if (previous_velocities_.find(agent_id) == previous_velocities_.end()) {
+            previous_velocities_[agent_id] = Eigen::Vector3d::Zero();
+        }
+        return previous_velocities_[agent_id];
+    }
+    
+    void setPreviousVelocity(int agent_id, const Eigen::Vector3d& vel) {
+        previous_velocities_[agent_id] = vel;
+    }
 
     //Helper functions
     std::vector<Eigen::Vector3d> getDesNodesInit() { return nodes_des_init; }

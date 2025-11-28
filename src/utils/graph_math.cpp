@@ -189,49 +189,125 @@ Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eige
         return Eigen::Vector3d::Zero();
     }
 
-    double k_gain = 100.0;          
-    double max_vel = 3.0;         
-    double damping = 0.4;         
-    double min_gradient = 0.001; 
+    // ===== PARAMETRELER =====
+    double k_formation = 0.5;       // Formation gradient kazancı
+    double k_position = 0.8;        // Pozisyon hatası kazancı
+    double max_vel = 2.0;
+    double damping = 0.3;
+    double min_error = 0.3;         // Bu mesafenin altında "ulaştı" say (m)
+    double collision_radius = 1.5;
+    double collision_gain = 2.0;
+    
+    Eigen::Vector3d prev_vel = getPreviousVelocity(agent_id);
     
     this->updateGraph(swarm_positions);
     
     Eigen::Vector3d gradient = this->getGrad(agent_id);
     
-    // DEBUG LOG
+    double formation_cost = 0.0;
+    this->calcFNorm2(formation_cost);
+    
+    // ===== CENTROID HESAPLA =====
+    Eigen::Vector3d current_centroid = Eigen::Vector3d::Zero();
+    Eigen::Vector3d desired_centroid = Eigen::Vector3d::Zero();
+    
+    for (size_t i = 0; i < swarm_positions.size(); i++) {
+        current_centroid += swarm_positions[i];
+        desired_centroid += nodes_des[i];
+    }
+    current_centroid /= static_cast<double>(swarm_positions.size());
+    desired_centroid /= static_cast<double>(nodes_des.size());
+    
+    // ===== POZİSYON HATASI HESAPLA =====
+    // Her drone'un hedefine olan pozisyon hatası
+    // (desired formation'ı current centroid'e translate et)
+    Eigen::Vector3d centroid_offset = current_centroid - desired_centroid;
+    Eigen::Vector3d adjusted_desired = nodes_des[agent_id] + centroid_offset;
+    Eigen::Vector3d position_error = adjusted_desired - swarm_positions[agent_id];
+    position_error.z() = 0.0;  // Z kilitle
+    
+    double pos_error_norm = position_error.norm();
+    
+    // ===== DEBUG LOG =====
     RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
-        "Agent %d | Gradient: [%.4f, %.4f, %.4f] Norm: %.4f", 
-        agent_id, gradient.x(), gradient.y(), gradient.z(), gradient.norm());
+        "[Agent %d] Pos:[%.1f,%.1f] AdjDes:[%.1f,%.1f] PosErr:%.2f Grad:[%.4f,%.4f] Cost:%.3f", 
+        agent_id,
+        swarm_positions[agent_id].x(), swarm_positions[agent_id].y(),
+        adjusted_desired.x(), adjusted_desired.y(),
+        pos_error_norm,
+        gradient.x(), gradient.y(),
+        formation_cost);
     
     gradient.z() = 0.0;
     
-    if (gradient.norm() < min_gradient) {
-        RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
-            "Agent %d STOPPING - gradient %.4f < min %.2f", 
-            agent_id, gradient.norm(), min_gradient);
+    // ===== ÇARPIŞMA ÖNLEME =====
+    Eigen::Vector3d collision_gradient = Eigen::Vector3d::Zero();
+    for (size_t i = 0; i < swarm_positions.size(); i++) {
+        if (static_cast<int>(i) == agent_id) continue;
         
-        previous_velocity_ = previous_velocity_ * 0.5;
-        if (previous_velocity_.norm() < 0.05) {
-            previous_velocity_ = Eigen::Vector3d::Zero();
+        Eigen::Vector3d diff = swarm_positions[agent_id] - swarm_positions[i];
+        diff.z() = 0.0;
+        double dist = diff.norm();
+        
+        if (dist < collision_radius && dist > 0.01) {
+            double repulsion = collision_gain * (1.0/dist - 1.0/collision_radius) * (1.0/(dist*dist));
+            collision_gradient += repulsion * diff.normalized();
+            
+            RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), 
+                "[Agent %d] COLLISION RISK with %zu, dist=%.2fm", agent_id, i, dist);
         }
-        return previous_velocity_;
     }
     
-    Eigen::Vector3d velocity = -k_gain * gradient;
+    // ===== DURMA KONTROLÜ =====
+    if (pos_error_norm < min_error && collision_gradient.norm() < 0.01) {
+        RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
+            "[Agent %d] CONVERGED - pos_error=%.3f < min=%.2f", 
+            agent_id, pos_error_norm, min_error);
+        
+        Eigen::Vector3d decaying_vel = prev_vel * 0.8;
+        if (decaying_vel.norm() < 0.05) {
+            decaying_vel = Eigen::Vector3d::Zero();
+        }
+        setPreviousVelocity(agent_id, decaying_vel);
+        return decaying_vel;
+    }
     
+    // ===== HIZ HESAPLA =====
+    // 1. Formation gradient: Şekli düzelt (graph-based)
+    // 2. Position error: Hedefe doğru çek (centroid-aligned)
+    // 3. Collision: Çarpışmadan kaçın
+    
+    Eigen::Vector3d vel_formation = -k_formation * gradient;
+    Eigen::Vector3d vel_position = k_position * position_error.normalized() * std::min(pos_error_norm, max_vel);
+    
+    // Ağırlıklı toplam:
+    // - Formation cost yüksekse: formation ağırlığı artar
+    // - Position error yüksekse: position ağırlığı artar
+    double formation_weight = std::min(1.0, formation_cost * 10.0);  // 0.1 cost → 1.0 weight
+    double position_weight = 1.0;
+    
+    Eigen::Vector3d velocity = formation_weight * vel_formation 
+                              + position_weight * vel_position 
+                              + collision_gradient;
     velocity.z() = 0.0;
     
+    // ===== HIZ SINIRLA =====
     if (velocity.norm() > max_vel) {
         velocity = velocity.normalized() * max_vel;
     }
-    velocity = (1.0 - damping) * velocity + damping * previous_velocity_;
     
-    // DEBUG LOG
+    // ===== DAMPING =====
+    velocity = (1.0 - damping) * velocity + damping * prev_vel;
+    
     RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
-        "Agent %d | Velocity: [%.2f, %.2f, %.2f]", 
-        agent_id, velocity.x(), velocity.y(), velocity.z());
+        "[Agent %d] VelForm:[%.2f,%.2f] VelPos:[%.2f,%.2f] Final:[%.2f,%.2f] |v|=%.2f", 
+        agent_id, 
+        vel_formation.x(), vel_formation.y(),
+        vel_position.x(), vel_position.y(),
+        velocity.x(), velocity.y(), 
+        velocity.norm());
     
-    previous_velocity_ = velocity;
+    setPreviousVelocity(agent_id, velocity);
     
     return velocity;
 }
