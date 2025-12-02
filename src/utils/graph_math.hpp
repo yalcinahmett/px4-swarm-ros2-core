@@ -17,7 +17,7 @@ private:
     std::vector<Eigen::Vector3d> agent_grad; //Contains the gradp of the swarm_graph
     bool have_desired;
     
-    // Per-agent previous velocity tracking (using map)
+    // Her agent için ayrı previous velocity (map ile)
     std::unordered_map<int, Eigen::Vector3d> previous_velocities_;
 
     Eigen::MatrixXd A;   //Adjacency matrix
@@ -61,7 +61,7 @@ public:
     Eigen::Vector3d getGrad(int id);
     bool getGrad(std::vector<Eigen::Vector3d> &swarm_grad);
 
-    // Per-agent previous velocity management
+    // Agent bazlı previous velocity yönetimi
     Eigen::Vector3d getPreviousVelocity(int agent_id) {
         if (previous_velocities_.find(agent_id) == previous_velocities_.end()) {
             previous_velocities_[agent_id] = Eigen::Vector3d::Zero();

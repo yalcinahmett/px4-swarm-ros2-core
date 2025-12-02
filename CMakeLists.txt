@@ -28,6 +28,7 @@ ament_target_dependencies(advanced_swarm
   "builtin_interfaces"
   "Eigen3"
 )
+
 target_link_libraries(advanced_swarm Eigen3::Eigen)
 target_include_directories(advanced_swarm PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -36,6 +37,10 @@ target_compile_features(advanced_swarm PUBLIC c_std_99 cxx_std_17)  # Require C9
 
 install(TARGETS advanced_swarm
   DESTINATION lib/${PROJECT_NAME})  
+
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

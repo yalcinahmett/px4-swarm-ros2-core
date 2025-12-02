@@ -69,7 +69,7 @@ public:
                 }
         });
 
-        swarm_size = 3; // Define the swarm size
+        swarm_size = 10; // Define the swarm size
         all_positions_.resize(swarm_size);
 
         for (int i = 0; i < swarm_size; i++)
@@ -118,9 +118,16 @@ public:
 				RCLCPP_INFO(this->get_logger(), "Takeoff successful, current altitude: %f", current_position_[2]);
 				
 				std::vector<Eigen::Vector3d> desired_formation;
-				desired_formation.push_back(Eigen::Vector3d(0.0, 0.0, -5.0));
-				desired_formation.push_back(Eigen::Vector3d(5.0, 5.0, -5.0));
-				desired_formation.push_back(Eigen::Vector3d(10.0, 0.0, -5.0));
+				desired_formation.push_back(Eigen::Vector3d(0.0, 0.0, -5.0));    // drone 0
+				desired_formation.push_back(Eigen::Vector3d(5.0, 0.0, -5.0));    // drone 1
+				desired_formation.push_back(Eigen::Vector3d(10.0, 0.0, -5.0));   // drone 2
+				desired_formation.push_back(Eigen::Vector3d(15.0, 0.0, -5.0));   // drone 3
+				desired_formation.push_back(Eigen::Vector3d(20.0, 0.0, -5.0));   // drone 4
+				desired_formation.push_back(Eigen::Vector3d(0.0, 5.0, -5.0));    // drone 5
+				desired_formation.push_back(Eigen::Vector3d(5.0, 5.0, -5.0));    // drone 6
+				desired_formation.push_back(Eigen::Vector3d(10.0, 5.0, -5.0));   // drone 7
+				desired_formation.push_back(Eigen::Vector3d(15.0, 5.0, -5.0));   // drone 8
+				desired_formation.push_back(Eigen::Vector3d(20.0, 5.0, -5.0));   // drone 9
 
 				swarm_graph_->setDesiredForm(desired_formation);
 
