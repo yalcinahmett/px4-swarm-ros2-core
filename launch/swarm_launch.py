@@ -4,7 +4,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     ld = LaunchDescription()
 
-    swarm_size = 10 
+    swarm_size = 4
 
     for i in range(swarm_size):  # Changed from range(1, swarm_size + 1)
         drone_id = i  # Now starts from 0

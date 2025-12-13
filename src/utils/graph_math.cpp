@@ -136,12 +136,9 @@ bool SwarmGraph::calcFGrad( Eigen::Vector3d &gradp, int idx ){
                 iter++;
             }
         }
-
-        // Gerçek gradient - normalize ETMİYORUZ!
-        // Böylece uzaktayken büyük, yakındayken küçük gradient elde ediyoruz
         Eigen::Vector3d raw_grad = dfde.transpose() * dedp;
         
-        // Çok küçük değerleri sıfırla (sayısal kararlılık için)
+        // Zero out very small values (for numerical stability)
         if(raw_grad.norm() < 1e-7){
             gradp = Eigen::Vector3d::Zero();
         } else {
@@ -178,137 +175,161 @@ bool SwarmGraph::getGrad(std::vector<Eigen::Vector3d> &swarm_grad){
 
 Eigen::Vector3d SwarmGraph::computeVelocity(int agent_id, const std::vector<Eigen::Vector3d> &swarm_positions) {
 
-    // Güvenlik kontrolleri
-    if (agent_id < 0 || agent_id >= static_cast<int>(swarm_positions.size())) {
-        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Invalid agent_id: %d", agent_id);
-        return Eigen::Vector3d::Zero();
-    }
-    
-    if (!have_desired || agent_id >= static_cast<int>(nodes_des.size())) {
-        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), "Desired formation not set");
+    // Safety checks
+    if (agent_id < 0 || agent_id >= static_cast<int>(swarm_positions.size()) || !have_desired) {
         return Eigen::Vector3d::Zero();
     }
 
-    // ===== PARAMETRELER =====
-    double k_formation = 0.5;       // Formation gradient kazancı
-    double k_position = 0.8;        // Pozisyon hatası kazancı
-    double max_vel = 2.0;
-    double damping = 0.3;
-    double min_error = 0.3;         // Bu mesafenin altında "ulaştı" say (m)
-    double collision_radius = 1.5;
-    double collision_gain = 2.0;
-    
-    Eigen::Vector3d prev_vel = getPreviousVelocity(agent_id);
-    
+    // Update the graph
     this->updateGraph(swarm_positions);
     
+    // Current velocity and Gradient
+    Eigen::Vector3d prev_vel = getPreviousVelocity(agent_id);
     Eigen::Vector3d gradient = this->getGrad(agent_id);
-    
-    double formation_cost = 0.0;
-    this->calcFNorm2(formation_cost);
-    
-    // ===== CENTROID HESAPLA =====
+    gradient.z() = 0.0; 
+
+    // Find swarm and desired centroids
     Eigen::Vector3d current_centroid = Eigen::Vector3d::Zero();
     Eigen::Vector3d desired_centroid = Eigen::Vector3d::Zero();
     
     for (size_t i = 0; i < swarm_positions.size(); i++) {
         current_centroid += swarm_positions[i];
-        desired_centroid += nodes_des[i];
+        desired_centroid += nodes_des[i]; // Ideal formation centroid
     }
     current_centroid /= static_cast<double>(swarm_positions.size());
     desired_centroid /= static_cast<double>(nodes_des.size());
+
+    // We shift the target according to the CURRENT centroid of the swarm.
+    // Wherever the swarm has moved, my target moves there too.
+    Eigen::Vector3d centroid_shift = current_centroid - desired_centroid;
     
-    // ===== POZİSYON HATASI HESAPLA =====
-    // Her drone'un hedefine olan pozisyon hatası
-    // (desired formation'ı current centroid'e translate et)
-    Eigen::Vector3d centroid_offset = current_centroid - desired_centroid;
-    Eigen::Vector3d adjusted_desired = nodes_des[agent_id] + centroid_offset;
-    Eigen::Vector3d position_error = adjusted_desired - swarm_positions[agent_id];
-    position_error.z() = 0.0;  // Z kilitle
+    // Flexible target position
+    Eigen::Vector3d flexible_target = nodes_des[agent_id] + centroid_shift; 
     
-    double pos_error_norm = position_error.norm();
+    // Error vector
+    Eigen::Vector3d position_error = flexible_target - swarm_positions[agent_id];
+    position_error.z() = 0.0;
+
+    double k_graph    = 1.5;  // Graph based velocity gain
+    double k_position = 0.5;  // Position correction gain
+    double k_drag     = 0.2;  // Drag prevention "Virtual Anchor" (Should be very small)
     
-    // ===== DEBUG LOG =====
-    RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
-        "[Agent %d] Pos:[%.1f,%.1f] AdjDes:[%.1f,%.1f] PosErr:%.2f Grad:[%.4f,%.4f] Cost:%.3f", 
-        agent_id,
-        swarm_positions[agent_id].x(), swarm_positions[agent_id].y(),
-        adjusted_desired.x(), adjusted_desired.y(),
-        pos_error_norm,
-        gradient.x(), gradient.y(),
-        formation_cost);
+    Eigen::Vector3d vel_graph = -k_graph * gradient;
+
+    Eigen::Vector3d vel_pos = k_position * position_error;
+
+    Eigen::Vector3d anchor_pull = Eigen::Vector3d::Zero();
+    if (current_centroid.norm() > 1.0) { // If the centroid has shifted more than 1 meter
+        // Apply a small pull towards the centroid
+        anchor_pull = -k_drag * (current_centroid - desired_centroid);
+    }
+
+    // ========== COLLISION AVOIDANCE - ULTRA AGGRESSIVE ==========
+    Eigen::Vector3d collision_vec = Eigen::Vector3d::Zero();
+    double collision_radius = 5.0;     // Very early detection
+    double safe_distance = 3.0;        // Larger safe zone
+    double collision_gain = 25.0;      // Much stronger repulsion
     
-    gradient.z() = 0.0;
+    double min_dist_to_others = 999.0;
+    int closest_neighbor = -1;
     
-    // ===== ÇARPIŞMA ÖNLEME =====
-    Eigen::Vector3d collision_gradient = Eigen::Vector3d::Zero();
     for (size_t i = 0; i < swarm_positions.size(); i++) {
         if (static_cast<int>(i) == agent_id) continue;
-        
         Eigen::Vector3d diff = swarm_positions[agent_id] - swarm_positions[i];
         diff.z() = 0.0;
         double dist = diff.norm();
         
-        if (dist < collision_radius && dist > 0.01) {
-            double repulsion = collision_gain * (1.0/dist - 1.0/collision_radius) * (1.0/(dist*dist));
-            collision_gradient += repulsion * diff.normalized();
-            
-            RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), 
-                "[Agent %d] COLLISION RISK with %zu, dist=%.2fm", agent_id, i, dist);
+        if (dist < min_dist_to_others) {
+            min_dist_to_others = dist;
+            closest_neighbor = i;
         }
-    }
-    
-    // ===== DURMA KONTROLÜ =====
-    if (pos_error_norm < min_error && collision_gradient.norm() < 0.01) {
-        RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
-            "[Agent %d] CONVERGED - pos_error=%.3f < min=%.2f", 
-            agent_id, pos_error_norm, min_error);
         
-        Eigen::Vector3d decaying_vel = prev_vel * 0.8;
-        if (decaying_vel.norm() < 0.05) {
-            decaying_vel = Eigen::Vector3d::Zero();
+        if (dist < collision_radius && dist > 0.01) {
+            double danger = (collision_radius - dist) / (collision_radius - safe_distance);
+            danger = std::max(0.0, std::min(danger, 1.0));
+            
+            // EXTREME exponential repulsion
+            double rep = collision_gain * std::pow(danger, 4.0) * (1.0 / (dist * dist));
+            
+            if (dist < safe_distance) {
+                // CRITICAL: Override everything else
+                rep = collision_gain * 20.0 / (dist * dist);
+            }
+            
+            collision_vec += rep * diff.normalized();
         }
-        setPreviousVelocity(agent_id, decaying_vel);
-        return decaying_vel;
+    }
+
+    // ========== ADAPTIVE TARGET MODIFICATION ==========
+    // If we're too close to someone AND they're blocking our path to target
+    Eigen::Vector3d modified_target = flexible_target;
+    
+    if (min_dist_to_others < safe_distance * 1.5 && closest_neighbor >= 0) {
+        // Vector from me to my target
+        Eigen::Vector3d to_target = flexible_target - swarm_positions[agent_id];
+        to_target.z() = 0.0;
+        
+        // Vector from me to the blocking neighbor
+        Eigen::Vector3d to_neighbor = swarm_positions[closest_neighbor] - swarm_positions[agent_id];
+        to_neighbor.z() = 0.0;
+        
+        // Check if neighbor is blocking my path (similar direction)
+        if (to_target.norm() > 0.1 && to_neighbor.norm() > 0.1) {
+            double angle_cos = to_target.dot(to_neighbor) / (to_target.norm() * to_neighbor.norm());
+            
+            // If neighbor is in front of me (angle < 90 degrees)
+            if (angle_cos > 0.3) {
+                // Create a temporary detour target - go around the neighbor
+                Eigen::Vector3d perpendicular(-to_neighbor.y(), to_neighbor.x(), 0.0);
+                perpendicular.normalize();
+                
+                // Detour target: move sideways to avoid collision
+                modified_target = swarm_positions[agent_id] + perpendicular * safe_distance * 2.0;
+                
+                RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
+                    "Agent %d: Taking detour to avoid agent %d (dist=%.2f)", 
+                    agent_id, closest_neighbor, min_dist_to_others);
+            }
+        }
     }
     
-    // ===== HIZ HESAPLA =====
-    // 1. Formation gradient: Şekli düzelt (graph-based)
-    // 2. Position error: Hedefe doğru çek (centroid-aligned)
-    // 3. Collision: Çarpışmadan kaçın
+    // Recalculate position error with modified target
+    position_error = modified_target - swarm_positions[agent_id];
+    position_error.z() = 0.0;
+    vel_pos = k_position * position_error;
+
+    // ========== VELOCITY CALCULATION WITH PRIORITIES ==========
+    Eigen::Vector3d velocity;
     
-    Eigen::Vector3d vel_formation = -k_formation * gradient;
-    Eigen::Vector3d vel_position = k_position * position_error.normalized() * std::min(pos_error_norm, max_vel);
-    
-    // Ağırlıklı toplam:
-    // - Formation cost yüksekse: formation ağırlığı artar
-    // - Position error yüksekse: position ağırlığı artar
-    double formation_weight = std::min(1.0, formation_cost * 10.0);  // 0.1 cost → 1.0 weight
-    double position_weight = 1.0;
-    
-    Eigen::Vector3d velocity = formation_weight * vel_formation 
-                              + position_weight * vel_position 
-                              + collision_gradient;
-    velocity.z() = 0.0;
-    
-    // ===== HIZ SINIRLA =====
-    if (velocity.norm() > max_vel) {
-        velocity = velocity.normalized() * max_vel;
+    if (min_dist_to_others < safe_distance) {
+        // EMERGENCY: 100% collision avoidance
+        velocity = collision_vec;
+        
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), 
+            "Agent %d: EMERGENCY! Distance: %.2fm - IGNORING FORMATION", 
+            agent_id, min_dist_to_others);
+            
+    } else if (min_dist_to_others < safe_distance * 1.5) {
+        // DANGER ZONE: 90% collision, 10% formation
+        velocity = 0.9 * collision_vec + 0.1 * (vel_graph + vel_pos + anchor_pull);
+        
+        RCLCPP_WARN(rclcpp::get_logger("SwarmGraph"), 
+            "Agent %d: DANGER ZONE! Distance: %.2fm", 
+            agent_id, min_dist_to_others);
+        
+    } else {
+        // SAFE: Normal operation with all forces
+        velocity = vel_graph + vel_pos + anchor_pull + collision_vec;
     }
+
+    // Limits and Damping
+    double max_vel = 1.5;
+    if (velocity.norm() > max_vel) velocity = velocity.normalized() * max_vel;
     
-    // ===== DAMPING =====
+    // Reduce damping in emergency situations for faster response
+    double damping = (min_dist_to_others < safe_distance) ? 0.05 : 0.2;
     velocity = (1.0 - damping) * velocity + damping * prev_vel;
-    
-    RCLCPP_INFO(rclcpp::get_logger("SwarmGraph"), 
-        "[Agent %d] VelForm:[%.2f,%.2f] VelPos:[%.2f,%.2f] Final:[%.2f,%.2f] |v|=%.2f", 
-        agent_id, 
-        vel_formation.x(), vel_formation.y(),
-        vel_position.x(), vel_position.y(),
-        velocity.x(), velocity.y(), 
-        velocity.norm());
-    
     setPreviousVelocity(agent_id, velocity);
-    
+
     return velocity;
 }
-
