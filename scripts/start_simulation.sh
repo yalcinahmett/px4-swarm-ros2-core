@@ -10,5 +10,5 @@ terminator --new-tab -e "bash -c 'cd ~ && ./QGroundControl*.AppImage; exec bash'
 sleep 5 
 
 echo "Starting PX4 Instances ..."
-terminator --new-tab -e "bash -c 'cd ~/PX4-Autopilot && ./Tools/simulation/gz_multi_vehicle.sh 5 5.0 ; exec bash'" &
+terminator --new-tab -e "bash -c 'cd ~/PX4-Autopilot && ./Tools/simulation/gz_multi_vehicle.sh 4 5.0 ; exec bash'" &
 sleep 5 
